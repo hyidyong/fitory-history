@@ -3,246 +3,759 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Fitory Workspace</title>
+  <title>Fitory History</title>
   
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
-<body>
+<body style="margin: 0; padding: 0; background: #000;">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    // 💡 1. import 대신 React 객체에서 꺼내 쓰기
+    const { useState, useEffect, useRef } = React;
 
-    const DEFAULT_CATS = [
-      { id: "video", label: "영상", icon: "▶", color: "#FF6B35", bg: "#FFF0EB" },
-      { id: "landing", label: "랜딩페이지", icon: "⬡", color: "#3B82F6", bg: "#EFF6FF" },
-      { id: "domain", label: "도메인", icon: "◉", color: "#10B981", bg: "#ECFDF5" },
-      { id: "bizplan", label: "사업계획서", icon: "◻", color: "#8B5CF6", bg: "#F5F3FF" },
-      { id: "proto", label: "프로토타입", icon: "◈", color: "#F59E0B", bg: "#FFFBEB" },
-      { id: "grant", label: "지원사업", icon: "★", color: "#EF4444", bg: "#FEF2F2" },
-      { id: "team", label: "팀빌딩", icon: "◎", color: "#06B6D4", bg: "#ECFEFF" },
-      { id: "other", label: "기타", icon: "◆", color: "#6B7280", bg: "#F9FAFB" },
-    ];
-
-    const SK = { E: "fitory-v5-entries" };
-
-    const SEED_E = [
-      { id: "s1", date: "2026-03-01", category: "domain", title: "fitory.kr 도메인 구매", desc: "가비아 등록", fileName: "", fileData: null },
-      { id: "s2", date: "2026-03-08", category: "bizplan", title: "예창패 사업계획서 1차 초안", desc: "여성 특화 트랙", fileName: "", fileData: null }
-    ];
-
-    const fmtDate = (d) => {
-      if (!d) return "";
-      return new Date(`${d}T00:00:00`).toLocaleDateString();
+    // 💡 2. 브라우저에서 window.storage가 작동하도록 IndexedDB로 연결해주는 마법의 코드
+    const DB_NAME = "fitory-storage-db";
+    const STORE_NAME = "kv-store";
+    const openStorageDB = () => new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(STORE_NAME);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    window.storage = {
+        get: async (key) => {
+            const db = await openStorageDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, "readonly");
+                const req = tx.objectStore(STORE_NAME).get(key);
+                req.onsuccess = () => resolve(req.result ? { value: req.result } : null);
+                req.onerror = () => reject(req.error);
+            });
+        },
+        set: async (key, value) => {
+            const db = await openStorageDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, "readwrite");
+                tx.objectStore(STORE_NAME).put(value, key);
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+            });
+        }
     };
 
-    const DB_NAME = "fitory-db";
-    const STORE_NAME = "store";
+    // ── CONSTANTS ──────────────────────────────────────────────
+    const CATS=[
+      {id:"video",   label:"영상",       icon:"▶", color:"#FF6B35",bg:"#FFF0EB"},
+      {id:"landing", label:"랜딩페이지",  icon:"⬡", color:"#3B82F6",bg:"#EFF6FF"},
+      {id:"domain",  label:"도메인",     icon:"◉", color:"#10B981",bg:"#ECFDF5"},
+      {id:"bizplan", label:"사업계획서",  icon:"◻", color:"#8B5CF6",bg:"#F5F3FF"},
+      {id:"proto",   label:"프로토타입", icon:"◈", color:"#F59E0B",bg:"#FFFBEB"},
+      {id:"grant",   label:"지원사업",   icon:"★", color:"#EF4444",bg:"#FEF2F2"},
+      {id:"team",    label:"팀빌딩",     icon:"◎", color:"#06B6D4",bg:"#ECFEFF"},
+      {id:"other",   label:"기타",       icon:"◆", color:"#6B7280",bg:"#F9FAFB"},
+    ];
+    const getCat=id=>CATS.find(c=>c.id===id)||CATS[7];
 
-    function openDB() {
-      return new Promise((resolve, reject) => {
-        try {
-          if (!window.indexedDB) {
-            return reject("IndexedDB 미지원");
-          }
-          const req = window.indexedDB.open(DB_NAME, 1);
-          req.onupgradeneeded = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-              db.createObjectStore(STORE_NAME);
-            }
-          };
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        } catch (err) {
-          reject(err);
-        }
-      });
-    }
+    const MILESTONES=[
+      {id:"first",    icon:"🌱",label:"첫 기록",     desc:"피토리의 여정이 시작됐어요",   check:(e)=>e.length>=1},
+      {id:"domain",   icon:"🌐",label:"도메인 확보",  desc:"공식 도메인을 등록했어요",     check:(e)=>e.some(x=>x.category==="domain")},
+      {id:"bizplan",  icon:"📋",label:"사업계획서",   desc:"사업계획서를 완성했어요",      check:(e)=>e.some(x=>x.category==="bizplan")},
+      {id:"proto",    icon:"💻",label:"프로토타입",   desc:"첫 프로토타입을 만들었어요",   check:(e)=>e.some(x=>x.category==="proto")},
+      {id:"landing",  icon:"🚀",label:"랜딩 배포",    desc:"세상에 공개됐어요",            check:(e)=>e.some(x=>x.category==="landing")},
+      {id:"grant",    icon:"🏆",label:"지원사업",     desc:"지원사업에 도전했어요",        check:(e)=>e.some(x=>x.category==="grant")},
+      {id:"team2",    icon:"👥",label:"팀 구성",      desc:"함께할 팀원이 생겼어요",       check:(_,__,t)=>t.length>=2},
+      {id:"news1",    icon:"📰",label:"언론 노출",    desc:"첫 기사가 스크랩됐어요",       check:(_,n)=>n.length>=1},
+      {id:"r10",      icon:"✨",label:"기록 10개",    desc:"꾸준히 기록하고 있어요",       check:(e)=>e.length>=10},
+      {id:"r30",      icon:"🎯",label:"기록 30개",    desc:"대단한 기록력이에요",          check:(e)=>e.length>=30},
+    ];
 
-    async function sGet(key) {
-      try {
-        const db = await openDB();
-        return new Promise((resolve, reject) => {
-          const tx = db.transaction(STORE_NAME, "readonly");
-          const store = tx.objectStore(STORE_NAME);
-          const req = store.get(key);
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        });
-      } catch (err) {
-        return null;
-      }
-    }
+    const OUTLET_COLORS={"조선일보":"#E63946","중앙일보":"#F4A261","동아일보":"#2A9D8F","한겨레":"#457B9D","매일경제":"#1D3557","한국경제":"#E9C46A","연합뉴스":"#2196F3","YTN":"#FF5722","KBS":"#3F51B5","MBC":"#4CAF50","SBS":"#FF9800","경향신문":"#795548"};
 
-    async function sSet(key, value) {
-      try {
-        const db = await openDB();
-        return new Promise((resolve, reject) => {
-          const tx = db.transaction(STORE_NAME, "readwrite");
-          const store = tx.objectStore(STORE_NAME);
-          store.put(value, key);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error);
-        });
-      } catch (err) {}
-    }
+    const SKE="fitory-v4-entries", SKN="fitory-v4-news", SKT="fitory-v4-team", SKM="fitory-v4-memos";
 
-    const getSafeObjectURL = (data) => {
-      if (!data) return "";
-      try {
-        return URL.createObjectURL(data);
-      } catch (e) {
-        return "";
-      }
+    const today=new Date();
+    const pad2=n=>String(n).padStart(2,"0");
+    const fmtDate=d=>{if(!d)return"";const dt=new Date(d+"T12:00:00");return dt.toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric"});};
+    const fmtShort=d=>{if(!d)return"";const dt=new Date(d+"T12:00:00");return dt.toLocaleDateString("ko-KR",{month:"short",day:"numeric"});};
+    const toB64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f);});
+    const daysUntil=d=>{if(!d)return null;const diff=new Date(d+"T12:00:00")-new Date();return Math.ceil(diff/(1000*60*60*24));};
+
+    const SEED=[
+      {id:"s1",date:"2026-03-01",category:"domain", title:"fitory.kr 도메인 구매",desc:"가비아에서 피토리 공식 도메인 등록",url:"https://fitory.kr",expiryDate:"2027-03-01",fileName:"",fileData:"",createdAt:1740787200000},
+      {id:"s2",date:"2026-03-08",category:"bizplan",title:"예창패 사업계획서 1차 초안",desc:"여성 특화 트랙, 설문 N=118",url:"",expiryDate:"",fileName:"",fileData:"",createdAt:1741392000000},
+      {id:"s3",date:"2026-03-20",category:"proto",  title:"React 모바일 시뮬레이터",desc:"대여+구매 통합, 20개 이상 스크린",url:"",expiryDate:"",fileName:"",fileData:"",createdAt:1742428800000},
+      {id:"s4",date:"2026-04-01",category:"grant",  title:"예창패·창업중심대학 제출",desc:"세 곳 동시 지원 완료",url:"",expiryDate:"",fileName:"",fileData:"",createdAt:1743465600000},
+      {id:"s5",date:"2026-04-10",category:"landing",title:"피토리 랜딩페이지 배포",desc:"fitory.kr 공식 오픈",url:"https://fitory.kr",expiryDate:"",fileName:"",fileData:"",createdAt:1744243200000},
+    ];
+
+    const SEED_TEAM=[
+      {id:"t1",name:"손희정 (히댕)",role:"CEO · 공동창업자",bio:"법학과 3학년. 피토리 아이디어 기획·사업개발 총괄. YLC 인사부팀장.",skills:["기획","법무","마케팅","UX"],contributions:["사업계획서 작성","지원사업 전략","랜딩페이지 기획","투자자 커뮤니케이션"],equity:"70",joinDate:"2025-10-01",photo:"",instagram:"@heedo_fit",github:"hyidyong"},
+      {id:"t2",name:"공동창업자",role:"CTO · 공동창업자",bio:"풀스택 개발 경력 3년. 피토리 기술 개발 총괄.",skills:["React","Flutter","Node.js","AWS"],contributions:["앱 개발","서버 구축","기술 아키텍처"],equity:"30",joinDate:"2025-10-01",photo:"",instagram:"",github:""},
+    ];
+
+    // ── ICONS ──────────────────────────────────────────────────
+    const Ic={
+      back:()=><svg width="11" height="18" viewBox="0 0 11 20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M9 1L1 10l8 9"/></svg>,
+      plus:()=><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>,
+      home:()=><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>,
+      news:()=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 0-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>,
+      cal:()=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>,
+      team:()=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+      settings:()=><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
     };
 
-    function App() {
-      const [entries, setEntries] = useState([]);
-      const [title, setTitle] = useState("");
-      const [category, setCategory] = useState("other");
-      const [desc, setDesc] = useState("");
-      const [selectedFile, setSelectedFile] = useState(null);
+    function StatusBar(){
+      const [t,setT]=useState(new Date());
+      useEffect(()=>{const i=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(i);},[]);
+      return(<div style={{display:"flex",justifyContent:"space-between",padding:"12px 20px 0",fontSize:15,fontWeight:600,color:"#000",userSelect:"none",flexShrink:0}}>
+        <span>{t.getHours()}:{pad2(t.getMinutes())}</span>
+        <div style={{display:"flex",gap:5,alignItems:"center"}}><span style={{fontSize:11}}>●●●</span><span style={{fontSize:11}}>LTE</span><span style={{background:"#000",color:"#fff",borderRadius:3,padding:"1px 5px",fontSize:10,fontWeight:700}}>100</span></div>
+      </div>);
+    }
 
-      useEffect(() => {
-        (async () => {
-          try {
-            const data = await sGet(SK.E);
-            if (!data || data.length === 0) {
-              setEntries(SEED_E);
-            } else {
-              setEntries(data);
-            }
-          } catch (e) {
-            setEntries(SEED_E);
-          }
-        })();
-      }, []);
+    function BottomNav({active,onNav}){
+      const tabs=[{id:"home",ic:<Ic.home/>,l:"홈"},{id:"news",ic:<Ic.news/>,l:"뉴스"},{id:"calendar",ic:<Ic.cal/>,l:"캘린더"},{id:"team",ic:<Ic.team/>,l:"팀"},{id:"settings",ic:<Ic.settings/>,l:"설정"}];
+      return(<div style={{flexShrink:0,background:"rgba(255,255,255,0.96)",backdropFilter:"blur(20px)",borderTop:"1px solid rgba(0,0,0,0.08)",padding:"6px 0 18px",display:"flex"}}>
+        {tabs.map(t=>(<button key={t.id} onClick={()=>onNav(t.id)} style={{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer",padding:"4px 0"}}>
+          <div style={{color:active===t.id?"#007AFF":"#C7C7CC"}}>{t.ic}</div>
+          <span style={{fontSize:9,fontWeight:active===t.id?700:400,color:active===t.id?"#007AFF":"#C7C7CC"}}>{t.l}</span>
+        </button>))}
+      </div>);
+    }
 
-      const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!title.trim()) return alert("제목을 입력해주세요!");
+    const Card=({children,style={}})=><div style={{background:"#fff",borderRadius:16,...style}}>{children}</div>;
+    const Row=({label,children,border,style={}})=><div style={{display:"flex",alignItems:"center",padding:"13px 16px",gap:12,borderTop:border?"1px solid #F2F2F7":"none",...style}}><span style={{fontSize:14,color:"#000",minWidth:50,flexShrink:0}}>{label}</span><div style={{flex:1,display:"flex",justifyContent:"flex-end"}}>{children}</div></div>;
 
-        const newEntry = {
-          id: `entry-${Date.now()}`,
-          date: new Date().toISOString().slice(0, 10),
-          category: category,
-          title: title,
-          desc: desc,
-          fileName: selectedFile ? selectedFile.name : "",
-          fileType: selectedFile ? selectedFile.type : "",
-          fileData: selectedFile ? selectedFile : null, 
-        };
+    function EntryRow({entry,onClick}){
+      const cat=getCat(entry.category);
+      const exp=entry.expiryDate?daysUntil(entry.expiryDate):null;
+      return(<div onClick={onClick} style={{background:"#fff",borderRadius:14,padding:"13px 16px",cursor:"pointer",display:"flex",gap:12,alignItems:"center"}}
+        onMouseDown={e=>e.currentTarget.style.background="#F9F9F9"} onMouseUp={e=>e.currentTarget.style.background="#fff"}>
+        <div style={{width:44,height:44,borderRadius:12,background:cat.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:cat.color,flexShrink:0}}>{cat.icon}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:15,fontWeight:600,color:"#000",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:3,letterSpacing:"-0.02em"}}>{entry.title}</div>
+          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+            <span style={{fontSize:11,color:cat.color,fontWeight:600}}>{cat.label}</span>
+            <span style={{fontSize:11,color:"#C7C7CC"}}>· {fmtShort(entry.date)}</span>
+            {exp!==null&&exp<=60&&<span style={{fontSize:10,fontWeight:700,color:exp<=14?"#FF3B30":exp<=30?"#FF9500":"#8E8E93",background:exp<=14?"#FFF0F0":exp<=30?"#FFF8F0":"#F5F5F5",borderRadius:6,padding:"1px 6px"}}>만료 {exp}일 전</span>}
+          </div>
+        </div>
+        <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="#C7C7CC" strokeWidth="2" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+      </div>);
+    }
 
-        const updatedEntries = [newEntry, ...entries];
-        setEntries(updatedEntries);
-        await sSet(SK.E, updatedEntries); 
+    // ══════════════════════════════════════════════════════════
+    // HOME
+    // ══════════════════════════════════════════════════════════
+    function HomeScreen({entries,newsItems,team,onAdd,onEntry}){
+      const grouped=entries.reduce((acc,e)=>{const ym=e.date.slice(0,7);if(!acc[ym])acc[ym]=[];acc[ym].push(e);return acc;},{});
+      const sorted=Object.keys(grouped).sort((a,b)=>b.localeCompare(a));
+      const earned=MILESTONES.filter(m=>m.check(entries,newsItems,team));
+      const expiring=entries.filter(e=>e.expiryDate&&daysUntil(e.expiryDate)!==null&&daysUntil(e.expiryDate)<=60).sort((a,b)=>new Date(a.expiryDate)-new Date(b.expiryDate));
 
-        setTitle("");
-        setDesc("");
-        setSelectedFile(null);
-        const fileInput = document.getElementById("fileInput");
-        if (fileInput) fileInput.value = "";
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"8px 20px 16px",borderBottom:"1px solid rgba(0,0,0,0.06)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:16}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,letterSpacing:"0.06em",color:"#999",marginBottom:4}}>FITORY</div>
+              <div style={{fontSize:28,fontWeight:800,letterSpacing:"-0.04em",color:"#000",lineHeight:1}}>히스토리</div>
+            </div>
+            <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#007AFF,#00C2FF)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 12px rgba(0,122,255,.35)"}}><span style={{fontSize:16,color:"#fff",fontWeight:800}}>F</span></div>
+          </div>
+          {earned.length>0&&<div style={{overflowX:"auto",display:"flex",gap:8,paddingBottom:4,scrollbarWidth:"none"}}>
+            {earned.map(m=><div key={m.id} style={{flexShrink:0,background:"linear-gradient(135deg,#F0F7FF,#E8F4FF)",borderRadius:12,padding:"8px 12px",display:"flex",alignItems:"center",gap:6,border:"1px solid #DBEAFE"}}>
+              <span style={{fontSize:16}}>{m.icon}</span>
+              <div><div style={{fontSize:11,fontWeight:700,color:"#1D4ED8",whiteSpace:"nowrap"}}>{m.label}</div></div>
+            </div>)}
+          </div>}
+        </div>
+
+        <div style={{padding:"12px 0 20px"}}>
+          {expiring.map(e=>{const d=daysUntil(e.expiryDate);return(<div key={e.id} style={{margin:"0 12px 10px",background:d<=14?"#FFF0F0":d<=30?"#FFFBEB":"#F0FFF4",borderRadius:14,padding:"12px 16px",border:`1px solid ${d<=14?"#FFD0D0":d<=30?"#FDE68A":"#D1FAE5"}`}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:16}}>{d<=14?"🔴":d<=30?"🟡":"🟢"}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#000",marginBottom:2}}>{e.title}</div>
+                <div style={{fontSize:11,color:d<=14?"#DC2626":d<=30?"#D97706":"#059669",fontWeight:600}}>만료까지 {d}일 · {fmtDate(e.expiryDate)}</div>
+              </div>
+            </div>
+          </div>);})}
+
+          {entries.length===0?(<div style={{textAlign:"center",padding:"80px 40px"}}><div style={{fontSize:40,marginBottom:16}}>📁</div><div style={{fontSize:18,fontWeight:700,color:"#000",marginBottom:8}}>기록이 없어요</div></div>)
+          :sorted.map(ym=>(
+            <div key={ym} style={{marginBottom:8}}>
+              <div style={{padding:"14px 20px 8px",display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:13,fontWeight:700,color:"#000"}}>{new Date(ym+"-01").toLocaleDateString("ko-KR",{year:"numeric",month:"long"})}</span>
+                <div style={{flex:1,height:1,background:"rgba(0,0,0,0.08)"}}/>
+                <span style={{fontSize:11,color:"#C7C7CC"}}>{grouped[ym].length}건</span>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:2,padding:"0 12px"}}>
+                {grouped[ym].map(e=><EntryRow key={e.id} entry={e} onClick={()=>onEntry(e)}/>)}
+              </div>
+            </div>
+          ))}
+        </div>
+        <button onClick={onAdd} style={{position:"fixed",bottom:80,right:20,width:54,height:54,borderRadius:27,background:"#007AFF",border:"none",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 20px rgba(0,122,255,.45)",cursor:"pointer",zIndex:40,color:"#fff"}}><Ic.plus/></button>
+      </div>);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // NEWS
+    // ══════════════════════════════════════════════════════════
+    function NewsCard({item,onClick}){
+      return(<div onClick={onClick} style={{background:"#fff",borderRadius:16,overflow:"hidden",cursor:"pointer",boxShadow:"0 1px 6px rgba(0,0,0,.06)"}} onMouseDown={e=>e.currentTarget.style.opacity=".9"} onMouseUp={e=>e.currentTarget.style.opacity="1"}>
+        <div style={{width:"100%",aspectRatio:"16/9",overflow:"hidden",background:"#F2F2F7",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {item.thumb?<img src={item.thumb} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.parentNode.innerHTML="<span style='font-size:32px'>📰</span>";}}/>:<span style={{fontSize:32}}>📰</span>}
+        </div>
+        <div style={{padding:"12px 14px"}}>
+          <div style={{fontSize:15,fontWeight:700,color:"#000",letterSpacing:"-0.025em",lineHeight:1.4,marginBottom:8,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{item.title}</div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            {item.outlet&&<span style={{fontSize:11,fontWeight:700,color:"#fff",background:item.outletColor||"#8E8E93",borderRadius:5,padding:"2px 7px"}}>{item.outlet}</span>}
+            {item.journalist&&<span style={{fontSize:11,color:"#8E8E93"}}>{item.journalist} 기자</span>}
+            <span style={{fontSize:11,color:"#C7C7CC",marginLeft:"auto"}}>{fmtShort(item.date)}</span>
+          </div>
+        </div>
+      </div>);
+    }
+
+    function NewsScreen({newsItems,onAddNews,onNewsItem}){
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"8px 20px 14px",borderBottom:"1px solid rgba(0,0,0,0.06)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+            <div><div style={{fontSize:11,fontWeight:600,letterSpacing:"0.06em",color:"#999",marginBottom:4}}>FITORY</div><div style={{fontSize:28,fontWeight:800,letterSpacing:"-0.04em",color:"#000",lineHeight:1}}>뉴스 스크랩</div></div>
+            <button onClick={onAddNews} style={{background:"#007AFF",border:"none",borderRadius:20,padding:"8px 16px",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><Ic.plus/> 추가</button>
+          </div>
+        </div>
+        <div style={{padding:"12px 12px 80px",display:"flex",flexDirection:"column",gap:12}}>
+          {newsItems.length===0?(<div style={{textAlign:"center",padding:"80px 20px"}}><div style={{fontSize:40,marginBottom:16}}>📰</div><div style={{fontSize:18,fontWeight:700,color:"#000",marginBottom:8}}>스크랩한 뉴스가 없어요</div><div style={{fontSize:14,color:"#999",lineHeight:1.7}}>피토리 관련 기사가 나오면<br/>바로 스크랩해두세요</div><button onClick={onAddNews} style={{marginTop:20,background:"#007AFF",border:"none",borderRadius:22,padding:"12px 28px",color:"#fff",fontSize:15,fontWeight:600,cursor:"pointer"}}>+ 첫 뉴스 스크랩</button></div>)
+          :newsItems.map(item=><NewsCard key={item.id} item={item} onClick={()=>onNewsItem(item)}/>)}
+        </div>
+      </div>);
+    }
+
+    function AddNewsScreen({onSave,onClose}){
+      const [step,setStep]=useState(0);
+      const [url,setUrl]=useState("");const [pasted,setPasted]=useState("");
+      const [fetching,setFetching]=useState(false);const [parsing,setParsing]=useState(false);
+      const [date,setDate]=useState(new Date().toISOString().slice(0,10));
+      const [prev,setPrev]=useState({title:"",desc:"",thumb:"",outlet:"",journalist:"",outletColor:""});
+      const thumbRef=useRef();
+
+      const fetchOG=async()=>{
+        if(!url.trim())return;setFetching(true);
+        try{const res=await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url.trim())}`);const data=await res.json();const html=data.contents||"";
+          const g=p=>{const m=html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]+content=["']([^"']+)["']`,"i"))||html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${p}["']`,"i"));return m?m[1].trim():"";};
+          setPrev(p=>({...p,title:(g("og:title")||g("twitter:title")||(html.match(/<title[^>]*>([^<]+)<\/title>/i)||[])[1]||"").slice(0,120),desc:(g("og:description")||g("twitter:description")||"").slice(0,300),thumb:g("og:image")||g("twitter:image")||"",outlet:g("og:site_name")||""}));
+          setStep(2);}catch{setStep(2);}setFetching(false);
       };
 
-      const downloadFile = (entry) => {
-        if (!entry.fileData) return;
-        try {
-          const url = getSafeObjectURL(entry.fileData);
-          if (!url) return alert("손상된 파일입니다.");
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = entry.fileName;
-          a.click();
-          URL.revokeObjectURL(url);
-        } catch (e) {
-          alert("파일을 다운로드할 수 없습니다.");
-        }
+      const parseArticle=async()=>{
+        if(!pasted.trim())return;setParsing(true);
+        try{const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,messages:[{role:"user",content:`다음 한국 뉴스 기사에서 정보를 추출하세요. JSON만 반환:
+    {"outlet":"언론사명","journalist":"기자이름(기자 제외)","title":"기사제목"}
+    기사:\n${pasted.slice(0,2000)}`}]})});
+          const data=await res.json();const raw=data.content?.[0]?.text||"{}";
+          const parsed=JSON.parse(raw.replace(/```json|```/g,"").trim());
+          const oc=OUTLET_COLORS[parsed.outlet]||"#6B7280";
+          setPrev(p=>({...p,...parsed,outletColor:oc}));
+        }catch{}setParsing(false);setStep(2);
       };
 
-      const getCatInfo = (catId) => DEFAULT_CATS.find(c => c.id === catId) || DEFAULT_CATS[7];
+      const submit=async()=>{
+        if(!prev.title.trim()&&!url)return;
+        await onSave({date,title:prev.title||url,desc:prev.desc,url,thumb:prev.thumb,outlet:prev.outlet,journalist:prev.journalist,outletColor:prev.outletColor||OUTLET_COLORS[prev.outlet]||"#6B7280",fullText:pasted,createdAt:Date.now()});
+      };
 
-      return (
-        <div style={{ maxWidth: 800, margin: "0 auto", padding: 20, fontFamily: "sans-serif" }}>
-          <h1 style={{ borderBottom: "2px solid #eee", paddingBottom: 10 }}>🚀 Fitory Workspace</h1>
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #F2F2F7"}}>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#007AFF",fontSize:15,cursor:"pointer",padding:0}}>취소</button>
+          <span style={{fontSize:16,fontWeight:600,color:"#000"}}>뉴스 스크랩</span>
+          <button onClick={step<2?()=>setStep(2):submit} style={{background:"none",border:"none",color:"#007AFF",fontSize:15,fontWeight:700,cursor:"pointer",padding:0}}>{step<2?"건너뛰기":"저장"}</button>
+        </div>
+        <div style={{background:"#fff",display:"flex",borderBottom:"1px solid #F2F2F7"}}>
+          {["URL","전문","미리보기"].map((s,i)=><button key={i} onClick={()=>setStep(i)} style={{flex:1,background:"none",border:"none",borderBottom:`2px solid ${step===i?"#007AFF":"transparent"}`,padding:"11px 0",fontSize:12,fontWeight:step===i?700:400,color:step===i?"#007AFF":"#8E8E93",cursor:"pointer"}}>{s}</button>)}
+        </div>
+        <div style={{padding:"16px 16px 60px"}}>
+          {step===0&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <Card style={{padding:"16px"}}>
+              <div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:10}}>기사 URL</div>
+              <div style={{display:"flex",gap:8}}><input value={url} onChange={e=>setUrl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&fetchOG()} placeholder="https://news.naver.com/..." style={{flex:1,background:"#F2F2F7",border:"none",borderRadius:10,padding:"10px 14px",fontSize:14,outline:"none"}}/><button onClick={fetchOG} disabled={fetching||!url.trim()} style={{background:url.trim()?"#007AFF":"#C7C7CC",border:"none",borderRadius:10,padding:"10px 14px",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>{fetching?"…":"불러오기"}</button></div>
+            </Card>
+            <Card style={{padding:"13px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:14}}>날짜</span><input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{fontSize:14,color:"#007AFF",background:"none",border:"none",outline:"none"/></Card>
+          </div>}
+          {step===1&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <Card style={{padding:"16px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><span style={{fontSize:12,fontWeight:600,color:"#8E8E93"}}>기사 전문</span><button onClick={parseArticle} disabled={parsing||!pasted.trim()} style={{background:pasted.trim()?"#007AFF":"#C7C7CC",border:"none",borderRadius:20,padding:"6px 14px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>{parsing?"분석 중…":"기자·언론사 추출"}</button></div>
+              <textarea value={pasted} onChange={e=>setPasted(e.target.value)} placeholder="기사 본문을 붙여넣으세요&#10;기자 이름, 언론사가 자동으로 추출됩니다" rows={10} style={{width:"100%",background:"#F2F2F7",border:"none",borderRadius:10,padding:"12px",fontSize:13,outline:"none",resize:"none",lineHeight:1.7,fontFamily:"inherit"}}/>
+            </Card>
+          </div>}
+          {step===2&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <Card style={{overflow:"hidden"}}>
+              <input ref={thumbRef} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{const f=e.target.files?.[0];if(f){const d=await toB64(f);setPrev(p=>({...p,thumb:d}));}}}/>
+              <div style={{width:"100%",aspectRatio:"16/9",background:"#F2F2F7",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden",cursor:"pointer"}} onClick={()=>thumbRef.current?.click()}>
+                {prev.thumb?<img src={prev.thumb} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.parentNode.innerHTML="<span style='font-size:32px'>📸</span>";}}/>:<span style={{fontSize:32}}>📸</span>}
+                <div style={{position:"absolute",bottom:8,right:8,background:"rgba(0,0,0,.6)",borderRadius:8,padding:"5px 10px",color:"#fff",fontSize:11}}>📷 변경</div>
+              </div>
+              <div style={{padding:"14px 16px"}}><input value={prev.title} onChange={e=>setPrev(p=>({...p,title:e.target.value}))} style={{width:"100%",fontSize:16,fontWeight:700,color:"#000",background:"none",border:"none",outline:"none",letterSpacing:"-0.025em",borderBottom:"1px solid #F2F2F7",paddingBottom:10,marginBottom:10}} placeholder="기사 제목"/><textarea value={prev.desc} onChange={e=>setPrev(p=>({...p,desc:e.target.value}))} rows={2} style={{width:"100%",fontSize:13,color:"#8E8E93",background:"none",border:"none",outline:"none",resize:"none",lineHeight:1.6,fontFamily:"inherit"}} placeholder="요약"/></div>
+            </Card>
+            <Card style={{overflow:"hidden"}}>
+              <Row label="언론사"><div style={{display:"flex",gap:8,alignItems:"center"}}>{prev.outlet&&<span style={{background:prev.outletColor||"#8E8E93",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{prev.outlet}</span>}<input value={prev.outlet} onChange={e=>setPrev(p=>({...p,outlet:e.target.value,outletColor:OUTLET_COLORS[e.target.value]||p.outletColor}))} placeholder="조선일보" style={{background:"#F2F2F7",border:"none",borderRadius:8,padding:"5px 10px",fontSize:13,outline:"none",width:90,textAlign:"right"}}/></div></Row>
+              <Row label="기자" border><input value={prev.journalist} onChange={e=>setPrev(p=>({...p,journalist:e.target.value}))} placeholder="홍길동" style={{flex:1,background:"none",border:"none",outline:"none",fontSize:14,color:"#000",textAlign:"right"}}/></Row>
+              <Row label="날짜" border><input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{fontSize:14,color:"#007AFF",background:"none",border:"none",outline:"none"}}/></Row>
+            </Card>
+          </div>}
+        </div>
+      </div>);
+    }
 
-          <form onSubmit={handleSubmit} style={{ background: "#f9f9f9", padding: 20, borderRadius: 10, marginBottom: 30 }}>
-            <h3>새로운 기록 추가</h3>
-            <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-              <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: 8 }}>
-                {DEFAULT_CATS.map(c => (
-                  <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
-                ))}
-              </select>
-              <input 
-                type="text" 
-                placeholder="기록 제목 (예: 사업계획서 제출)" 
-                value={title} 
-                onChange={(e) => setTitle(e.target.value)} 
-                style={{ flex: 1, padding: 8 }}
-              />
+    function NewsDetailScreen({item,onBack,onDelete}){
+      const oc=item.outletColor||OUTLET_COLORS[item.outlet]||"#6B7280";
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"12px 20px",display:"flex",justifyContent:"space-between",borderBottom:"1px solid #F2F2F7"}}>
+          <button onClick={onBack} style={{background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:6,color:"#007AFF",fontSize:15,fontWeight:500,padding:0}}><Ic.back/> 뒤로</button>
+          <button onClick={onDelete} style={{background:"none",border:"none",color:"#FF3B30",fontSize:14,cursor:"pointer"}}>삭제</button>
+        </div>
+        <div style={{padding:"16px 16px 80px"}}>
+          <Card style={{overflow:"hidden",marginBottom:12}}>
+            {item.thumb&&<div style={{width:"100%",aspectRatio:"16/9",overflow:"hidden"}}><img src={item.thumb} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.parentNode.style.display="none";}}/></div>}
+            <div style={{padding:"18px"}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>{item.outlet&&<span style={{background:oc,color:"#fff",borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:700}}>{item.outlet}</span>}{item.journalist&&<span style={{fontSize:13,color:"#8E8E93"}}>{item.journalist} 기자</span>}<span style={{fontSize:12,color:"#C7C7CC",marginLeft:"auto"}}>{fmtDate(item.date)}</span></div>
+              <div style={{fontSize:20,fontWeight:800,color:"#000",letterSpacing:"-0.03em",lineHeight:1.4,marginBottom:10}}>{item.title}</div>
+              {item.desc&&<div style={{fontSize:14,color:"#555",lineHeight:1.75}}>{item.desc}</div>}
             </div>
-            <input 
-              type="text" 
-              placeholder="간단한 설명..." 
-              value={desc} 
-              onChange={(e) => setDesc(e.target.value)} 
-              style={{ width: "100%", padding: 8, marginBottom: 10, boxSizing: "border-box" }}
-            />
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <input 
-                id="fileInput"
-                type="file" 
-                onChange={(e) => setSelectedFile(e.target.files[0])} 
-              />
-              <button type="submit" style={{ padding: "10px 20px", background: "#3B82F6", color: "white", border: "none", borderRadius: 5, cursor: "pointer" }}>
-                기록 저장하기
-              </button>
-            </div>
-          </form>
+          </Card>
+          {item.url&&<a href={item.url} target="_blank" rel="noreferrer" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#007AFF",borderRadius:14,padding:"15px",color:"#fff",textDecoration:"none",fontWeight:700,fontSize:15,marginBottom:12}}>🔗 원문 보기</a>}
+          {item.fullText&&<Card style={{padding:"18px"}}><div style={{fontSize:11,fontWeight:700,color:"#8E8E93",marginBottom:8}}>기사 전문</div><div style={{fontSize:13,color:"#444",lineHeight:1.8,whiteSpace:"pre-wrap",maxHeight:260,overflow:"auto"}}>{item.fullText}</div></Card>}
+        </div>
+      </div>);
+    }
 
-          <div>
-            <h2>📈 나의 발자취 ({entries.length}개)</h2>
-            {entries.map((entry) => {
-              const catInfo = getCatInfo(entry.category);
-              const isImage = entry.fileType && typeof entry.fileType === "string" && entry.fileType.startsWith("image/");
-              
-              return (
-                <div key={entry.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 15, marginBottom: 15, display: "flex", gap: 15 }}>
-                  <div style={{ width: 50, height: 50, borderRadius: "50%", background: catInfo.bg, color: catInfo.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
-                    {catInfo.icon}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, color: "#666" }}>{fmtDate(entry.date)}</div>
-                    <h3 style={{ margin: "5px 0" }}>{entry.title}</h3>
-                    <p style={{ margin: 0, color: "#444", fontSize: 14 }}>{entry.desc}</p>
-                    
-                    {entry.fileData && (
-                      <div style={{ marginTop: 15, padding: 10, background: "#f1f5f9", borderRadius: 5, display: "inline-block" }}>
-                        <div style={{ fontSize: 12, marginBottom: 5 }}>📁 {entry.fileName}</div>
-                        {isImage && getSafeObjectURL(entry.fileData) && (
-                          <div style={{ marginBottom: 10 }}>
-                            <img src={getSafeObjectURL(entry.fileData)} alt="preview" style={{ maxWidth: 200, borderRadius: 5, border: "1px solid #ccc" }} />
-                          </div>
-                        )}
-                        <button onClick={() => downloadFile(entry)} style={{ fontSize: 12, padding: "5px 10px", cursor: "pointer", background: "white", border: "1px solid #ccc", borderRadius: 4 }}>
-                          ⬇ 다운로드
-                        </button>
-                      </div>
-                    )}
-                  </div>
+    // ══════════════════════════════════════════════════════════
+    // CALENDAR
+    // ══════════════════════════════════════════════════════════
+    function CalendarScreen({entries,onEntry,onAdd}){
+      const [year,setYear]=useState(today.getFullYear());
+      const [month,setMonth]=useState(today.getMonth());
+      const [sel,setSel]=useState(null);
+
+      const firstDay=new Date(year,month,1).getDay();
+      const pad=firstDay===0?6:firstDay-1;
+      const dim=new Date(year,month+1,0).getDate();
+      const byDate=entries.reduce((acc,e)=>{if(!acc[e.date])acc[e.date]=[];acc[e.date].push(e);return acc;},{});
+      const dk=d=>`${year}-${pad2(month+1)}-${pad2(d)}`;
+      const pM=()=>{if(month===0){setYear(y=>y-1);setMonth(11);}else setMonth(m=>m-1);setSel(null);};
+      const nM=()=>{if(month===11){setYear(y=>y+1);setMonth(0);}else setMonth(m=>m+1);setSel(null);};
+      const selEntries=sel?byDate[dk(sel)]||[]:[];
+      const DAYS=["월","화","수","목","금","토","일"];
+
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"8px 20px 12px",borderBottom:"1px solid rgba(0,0,0,0.06)"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <button onClick={pM} style={{background:"none",border:"none",cursor:"pointer",padding:"6px 10px",fontSize:20,color:"#007AFF"}}>‹</button>
+            <div style={{textAlign:"center"}}><div style={{fontSize:18,fontWeight:800,color:"#000",letterSpacing:"-0.03em"}}>{year}년 {month+1}월</div><div style={{fontSize:11,color:"#8E8E93",marginTop:2}}>{Object.keys(byDate).filter(k=>k.startsWith(`${year}-${pad2(month+1)}`)).reduce((s,k)=>s+(byDate[k]?.length||0),0)}개 기록</div></div>
+            <button onClick={nM} style={{background:"none",border:"none",cursor:"pointer",padding:"6px 10px",fontSize:20,color:"#007AFF"}}>›</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+            {DAYS.map((d,i)=><div key={d} style={{textAlign:"center",fontSize:11,fontWeight:600,color:i===6?"#FF3B30":i===5?"#007AFF":"#8E8E93",padding:"2px 0"}}>{d}</div>)}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:"1px",background:"#F0F0F0",border:"1px solid #F0F0F0",borderRadius:10,overflow:"hidden"}}>
+            {Array(pad).fill(null).map((_,i)=><div key={"p"+i} style={{background:"#FAFAFA",minHeight:76}}/>)}
+            {Array(dim).fill(null).map((_,i)=>{
+              const d=i+1; const key=dk(d); const evs=byDate[key]||[];
+              const isToday=d===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
+              const isSel=d===sel; const dow=(pad+i)%7;
+              return(<div key={d} onClick={()=>setSel(d===sel?null:d)} style={{background:isSel?"#EFF6FF":"#fff",minHeight:76,padding:"4px 3px",cursor:"pointer",overflow:"hidden"}}>
+                <div style={{width:22,height:22,borderRadius:11,background:isToday?"#007AFF":"transparent",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:2}}>
+                  <span style={{fontSize:12,fontWeight:isToday?700:400,color:isToday?"#fff":dow===6?"#FF3B30":dow===5?"#007AFF":"#000"}}>{d}</span>
                 </div>
-              );
+                {evs.slice(0,3).map((e,ei)=>{const c=getCat(e.category);return(<div key={ei} style={{background:c.color,borderRadius:4,padding:"2px 4px",marginBottom:2}}>
+                  <span style={{fontSize:9,fontWeight:600,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",display:"block",lineHeight:1.4}}>{e.title.length>7?e.title.slice(0,7)+"…":e.title}</span>
+                </div>);})}
+                {evs.length>3&&<div style={{fontSize:8,color:"#8E8E93",fontWeight:600,paddingLeft:2}}>+{evs.length-3}</div>}
+              </div>);
             })}
           </div>
         </div>
-      );
+        <div style={{padding:"12px 12px 100px"}}>
+          {sel?(<div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 4px 10px"}}>
+              <span style={{fontSize:15,fontWeight:700,color:"#000"}}>{month+1}월 {sel}일</span>
+              <button onClick={()=>onAdd(dk(sel))} style={{background:"#007AFF",border:"none",borderRadius:20,padding:"7px 16px",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>+ 추가</button>
+            </div>
+            {selEntries.length===0?(<Card style={{textAlign:"center",padding:"40px 20px"}}><div style={{fontSize:24,marginBottom:8}}>📭</div><div style={{fontSize:14,color:"#8E8E93"}}>기록이 없어요</div></Card>)
+            :<div style={{display:"flex",flexDirection:"column",gap:6}}>{selEntries.map(e=><EntryRow key={e.id} entry={e} onClick={()=>onEntry(e)}/>)}</div>}
+          </div>):(<div style={{textAlign:"center",padding:"40px 20px"}}><div style={{fontSize:24,marginBottom:8}}>👆</div><div style={{fontSize:14,color:"#8E8E93"}}>날짜를 탭해서 기록을 확인해요</div></div>)}
+        </div>
+      </div>);
     }
 
+    // ══════════════════════════════════════════════════════════
+    // TEAM
+    // ══════════════════════════════════════════════════════════
+    function TeamScreen({team,memos,onAddMember,onMember,onAddMemo,onDeleteMemo}){
+      const [memoText,setMemoText]=useState("");
+      const submit=async()=>{if(!memoText.trim())return;await onAddMemo(memoText.trim());setMemoText("");};
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"8px 20px 14px",borderBottom:"1px solid rgba(0,0,0,0.06)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+            <div><div style={{fontSize:11,fontWeight:600,letterSpacing:"0.06em",color:"#999",marginBottom:4}}>FITORY</div><div style={{fontSize:28,fontWeight:800,letterSpacing:"-0.04em",color:"#000",lineHeight:1}}>팀</div></div>
+            <button onClick={onAddMember} style={{background:"#007AFF",border:"none",borderRadius:20,padding:"8px 16px",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><Ic.plus/> 팀원 추가</button>
+          </div>
+        </div>
+        <div style={{padding:"16px 12px 100px",display:"flex",flexDirection:"column",gap:20}}>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {team.map(m=><TeamCard key={m.id} member={m} onClick={()=>onMember(m)}/>)}
+            {team.length===0&&<div style={{textAlign:"center",padding:"40px 20px",background:"#fff",borderRadius:16}}><div style={{fontSize:32,marginBottom:10}}>👥</div><div style={{fontSize:15,fontWeight:600,color:"#000",marginBottom:6}}>팀원을 추가해봐요</div></div>}
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8,paddingLeft:4}}>팀 메모 📝</div>
+            <Card style={{padding:"14px"}}>
+              <div style={{display:"flex",gap:8,marginBottom:12}}>
+                <input value={memoText} onChange={e=>setMemoText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()} placeholder="팀 공유 메모를 남겨봐요" style={{flex:1,background:"#F2F2F7",border:"none",borderRadius:10,padding:"10px 14px",fontSize:14,outline:"none"}}/>
+                <button onClick={submit} disabled={!memoText.trim()} style={{background:memoText.trim()?"#007AFF":"#C7C7CC",border:"none",borderRadius:10,padding:"10px 14px",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>추가</button>
+              </div>
+              {memos.length===0?(<div style={{textAlign:"center",padding:"20px",fontSize:13,color:"#C7C7CC"}}>아직 메모가 없어요</div>)
+              :<div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {memos.map(m=><div key={m.id} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"10px 0",borderBottom:"1px solid #F2F2F7"}}>
+                  <div style={{flex:1}}><div style={{fontSize:14,color:"#000",lineHeight:1.5}}>{m.text}</div><div style={{fontSize:11,color:"#C7C7CC",marginTop:4}}>{new Date(m.createdAt).toLocaleString("ko-KR")}</div></div>
+                  <button onClick={()=>onDeleteMemo(m.id)} style={{background:"none",border:"none",color:"#C7C7CC",cursor:"pointer",fontSize:16,padding:"0 4px",flexShrink:0}}>×</button>
+                </div>)}
+              </div>}
+            </Card>
+          </div>
+        </div>
+      </div>);
+    }
+
+    function TeamCard({member,onClick}){
+      return(<div onClick={onClick} style={{background:"#fff",borderRadius:16,padding:"16px",cursor:"pointer",display:"flex",gap:14,alignItems:"center"}} onMouseDown={e=>e.currentTarget.style.background="#F9F9F9"} onMouseUp={e=>e.currentTarget.style.background="#fff"}>
+        <div style={{width:60,height:60,borderRadius:30,overflow:"hidden",flexShrink:0,background:"linear-gradient(135deg,#007AFF,#00C2FF)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {member.photo?<img src={member.photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:24,color:"#fff",fontWeight:800}}>{(member.name||"?")[0]}</span>}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:17,fontWeight:700,color:"#000",letterSpacing:"-0.025em",marginBottom:4}}>{member.name}</div>
+          <div style={{fontSize:13,color:"#8E8E93",marginBottom:6}}>{member.role}</div>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+            {(member.skills||[]).slice(0,3).map(s=><span key={s} style={{fontSize:10,fontWeight:600,background:"#EFF6FF",color:"#3B82F6",borderRadius:6,padding:"2px 7px"}}>{s}</span>)}
+            {member.equity&&<span style={{fontSize:10,fontWeight:600,background:"#F0FFF4",color:"#10B981",borderRadius:6,padding:"2px 7px"}}>지분 {member.equity}%</span>}
+          </div>
+        </div>
+        <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="#C7C7CC" strokeWidth="2" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+      </div>);
+    }
+
+    function TeamDetailScreen({member,onBack,onEdit,onDelete}){
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"12px 20px",display:"flex",justifyContent:"space-between",borderBottom:"1px solid #F2F2F7"}}>
+          <button onClick={onBack} style={{background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:6,color:"#007AFF",fontSize:15,padding:0}}><Ic.back/> 뒤로</button>
+          <button onClick={onEdit} style={{background:"none",border:"none",color:"#007AFF",fontSize:15,fontWeight:500,cursor:"pointer"}}>수정</button>
+        </div>
+        <div style={{padding:"20px 16px 100px"}}>
+          <Card style={{padding:"24px",marginBottom:12,textAlign:"center"}}>
+            <div style={{width:80,height:80,borderRadius:40,overflow:"hidden",margin:"0 auto 14px",background:"linear-gradient(135deg,#007AFF,#00C2FF)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              {member.photo?<img src={member.photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:32,color:"#fff",fontWeight:800}}>{(member.name||"?")[0]}</span>}
+            </div>
+            <div style={{fontSize:22,fontWeight:800,color:"#000",letterSpacing:"-0.03em",marginBottom:4}}>{member.name}</div>
+            <div style={{fontSize:14,color:"#8E8E93",marginBottom:12}}>{member.role}</div>
+            {member.bio&&<div style={{fontSize:14,color:"#555",lineHeight:1.7,background:"#F9FAFB",borderRadius:10,padding:"12px",textAlign:"left"}}>{member.bio}</div>}
+          </Card>
+          {(member.skills?.length>0)&&<Card style={{padding:"16px 18px",marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#8E8E93",marginBottom:10}}>스킬</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{member.skills.map(s=><span key={s} style={{fontSize:12,fontWeight:600,background:"#EFF6FF",color:"#3B82F6",borderRadius:8,padding:"4px 10px"}}>{s}</span>)}</div>
+          </Card>}
+          {(member.contributions?.length>0)&&<Card style={{padding:"16px 18px",marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#8E8E93",marginBottom:10}}>주요 기여</div>
+            {member.contributions.filter(c=>c.trim()).map((c,i)=><div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:8}}>
+              <span style={{color:"#10B981",fontWeight:700,flexShrink:0,marginTop:1}}>✓</span><span style={{fontSize:14,color:"#000",lineHeight:1.5}}>{c}</span>
+            </div>)}
+          </Card>}
+          <Card style={{overflow:"hidden",marginBottom:12}}>
+            {[["지분",member.equity?`${member.equity}%`:"미정"],["합류일",fmtDate(member.joinDate)||"-"],["Instagram",member.instagram||"-"],["GitHub",member.github||"-"]].map(([l,v],i)=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"13px 16px",borderTop:i>0?"1px solid #F2F2F7":"none"}}><span style={{fontSize:14,color:"#000"}}>{l}</span><span style={{fontSize:14,color:"#8E8E93"}}>{v}</span></div>)}
+          </Card>
+          <button onClick={onDelete} style={{background:"#fff",border:"none",borderRadius:16,padding:"16px",width:"100%",fontSize:15,fontWeight:600,color:"#FF3B30",cursor:"pointer"}}>팀원 삭제</button>
+        </div>
+      </div>);
+    }
+
+    function AddTeamScreen({member,onSave,onClose}){
+      const isEdit=!!member;
+      const [form,setForm]=useState({name:member?.name||"",role:member?.role||"",bio:member?.bio||"",photo:member?.photo||"",equity:member?.equity||"",joinDate:member?.joinDate||"",instagram:member?.instagram||"",github:member?.github||"",skillsStr:(member?.skills||[]).join(", "),contsStr:(member?.contributions||[]).join("\n")});
+      const [saving,setSaving]=useState(false);
+      const photoRef=useRef();
+      const u=k=>v=>setForm(p=>({...p,[k]:v}));
+
+      const submit=async()=>{
+        if(!form.name.trim())return;setSaving(true);
+        const skills=form.skillsStr.split(",").map(s=>s.trim()).filter(Boolean);
+        const contributions=form.contsStr.split("\n").map(s=>s.trim()).filter(Boolean);
+        await onSave({name:form.name,role:form.role,bio:form.bio,photo:form.photo,equity:form.equity,joinDate:form.joinDate,instagram:form.instagram,github:form.github,skills,contributions});
+        setSaving(false);
+      };
+
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #F2F2F7"}}>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#007AFF",fontSize:15,cursor:"pointer",padding:0}}>취소</button>
+          <span style={{fontSize:16,fontWeight:600,color:"#000"}}>{isEdit?"팀원 수정":"팀원 추가"}</span>
+          <button onClick={submit} disabled={saving||!form.name.trim()} style={{background:"none",border:"none",color:form.name.trim()?"#007AFF":"#C7C7CC",fontSize:15,fontWeight:700,cursor:"pointer",padding:0}}>{saving?"저장 중":"완료"}</button>
+        </div>
+        <div style={{padding:"16px 16px 60px",display:"flex",flexDirection:"column",gap:16}}>
+          <div style={{display:"flex",justifyContent:"center",paddingTop:8}}>
+            <input ref={photoRef} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{const f=e.target.files?.[0];if(f){const d=await toB64(f);u("photo")(d);}}}/>
+            <div onClick={()=>photoRef.current?.click()} style={{width:80,height:80,borderRadius:40,overflow:"hidden",background:"linear-gradient(135deg,#007AFF,#00C2FF)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",position:"relative"}}>
+              {form.photo?<img src={form.photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:32,color:"#fff",fontWeight:800}}>{form.name?form.name[0]:"+"}</span>}
+              <div style={{position:"absolute",bottom:0,right:0,width:24,height:24,borderRadius:12,background:"#007AFF",border:"2px solid #fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#fff"}}>📷</div>
+            </div>
+          </div>
+          <Card style={{overflow:"hidden"}}>
+            {[["이름","name","홍길동",false],["역할","role","CEO · 공동창업자",true],["지분","equity","50",true],["합류일","joinDate","date",true],["Instagram","instagram","@username",true],["GitHub","github","username",true]].map(([l,k,ph,b])=>(
+              <Row key={k} label={l} border={b}>{k==="joinDate"?<input type="date" value={form[k]} onChange={e=>u(k)(e.target.value)} style={{fontSize:14,color:"#007AFF",background:"none",border:"none",outline:"none"}}/>:<input value={form[k]} onChange={e=>u(k)(e.target.value)} placeholder={ph} style={{flex:1,background:"none",border:"none",outline:"none",fontSize:14,color:"#000",textAlign:"right"}}/>}</Row>
+            ))}
+          </Card>
+          <Card style={{padding:"14px 16px"}}>
+            <div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8}}>소개</div>
+            <textarea value={form.bio} onChange={e=>u("bio")(e.target.value)} placeholder="간단한 소개 한 줄" rows={3} style={{width:"100%",background:"#F2F2F7",border:"none",borderRadius:10,padding:"10px",fontSize:14,outline:"none",resize:"none",lineHeight:1.6,fontFamily:"inherit"}}/>
+          </Card>
+          <Card style={{padding:"14px 16px"}}>
+            <div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8}}>스킬 (쉼표로 구분)</div>
+            <input value={form.skillsStr} onChange={e=>u("skillsStr")(e.target.value)} placeholder="기획, 법무, 마케팅" style={{width:"100%",background:"#F2F2F7",border:"none",borderRadius:10,padding:"10px",fontSize:14,outline:"none"}}/>
+          </Card>
+          <Card style={{padding:"14px 16px"}}>
+            <div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8}}>주요 기여 (줄바꿈으로 구분)</div>
+            <textarea value={form.contsStr} onChange={e=>u("contsStr")(e.target.value)} placeholder={"사업계획서 작성\n지원사업 전략\n투자자 커뮤니케이션"} rows={4} style={{width:"100%",background:"#F2F2F7",border:"none",borderRadius:10,padding:"10px",fontSize:14,outline:"none",resize:"none",lineHeight:1.6,fontFamily:"inherit"}}/>
+          </Card>
+        </div>
+      </div>);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // ADD ENTRY
+    // ══════════════════════════════════════════════════════════
+    function AddEntryScreen({entry,prefillDate,onSave,onClose}){
+      const isEdit=!!entry;
+      const [form,setForm]=useState({date:entry?.date||prefillDate||new Date().toISOString().slice(0,10),category:entry?.category||"other",title:entry?.title||"",desc:entry?.desc||"",url:entry?.url||"",expiryDate:entry?.expiryDate||"",fileName:entry?.fileName||"",fileData:entry?.fileData||""});
+      const [saving,setSaving]=useState(false);const fileRef=useRef();
+      const u=k=>v=>setForm(p=>({...p,[k]:v}));
+      const handleFile=async f=>{if(!f)return;if(f.size>4*1024*1024){alert("4MB 이하");return;}const d=await toB64(f);setForm(p=>({...p,fileName:f.name,fileData:d}));};
+      const submit=async()=>{if(!form.title.trim()||!form.date)return;setSaving(true);await onSave({...form,title:form.title.trim(),desc:form.desc.trim(),url:form.url.trim()});setSaving(false);};
+
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #F2F2F7"}}>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#007AFF",fontSize:15,cursor:"pointer",padding:0}}>취소</button>
+          <span style={{fontSize:16,fontWeight:600,color:"#000"}}>{isEdit?"수정하기":"새 기록"}</span>
+          <button onClick={submit} disabled={saving||!form.title.trim()} style={{background:"none",border:"none",color:form.title.trim()?"#007AFF":"#C7C7CC",fontSize:15,fontWeight:700,cursor:"pointer",padding:0}}>{saving?"저장 중":"완료"}</button>
+        </div>
+        <div style={{padding:"16px 16px 60px",display:"flex",flexDirection:"column",gap:14}}>
+          <div><div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8,paddingLeft:4}}>카테고리</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{CATS.map(c=><button key={c.id} onClick={()=>u("category")(c.id)} style={{padding:"7px 12px",borderRadius:20,border:`1.5px solid ${form.category===c.id?c.color:"transparent"}`,background:form.category===c.id?c.bg:"#fff",color:form.category===c.id?c.color:"#555",fontSize:12,fontWeight:600,cursor:"pointer"}}>{c.icon} {c.label}</button>)}</div>
+          </div>
+          <Card style={{overflow:"hidden"}}>
+            <Row label="날짜"><input type="date" value={form.date} onChange={e=>u("date")(e.target.value)} style={{fontSize:15,color:"#000",background:"none",border:"none",outline:"none"}}/></Row>
+            <Row label="제목" border><input value={form.title} onChange={e=>u("title")(e.target.value)} placeholder="기록 제목" style={{flex:1,fontSize:15,color:"#000",background:"none",border:"none",outline:"none",textAlign:"right"}}/></Row>
+            {form.category==="domain"&&<Row label="만료일" border><input type="date" value={form.expiryDate} onChange={e=>u("expiryDate")(e.target.value)} style={{fontSize:14,color:"#FF9500",background:"none",border:"none",outline:"none"}}/></Row>}
+            <Row label="링크" border><input value={form.url} onChange={e=>u("url")(e.target.value)} placeholder="https://" style={{flex:1,fontSize:14,color:"#007AFF",background:"none",border:"none",outline:"none",textAlign:"right"}}/></Row>
+          </Card>
+          <Card style={{padding:"14px 16px"}}><div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8}}>메모</div><textarea value={form.desc} onChange={e=>u("desc")(e.target.value)} placeholder="어떤 내용인지 메모" rows={4} style={{width:"100%",fontSize:14,color:"#000",background:"none",border:"none",outline:"none",resize:"none",lineHeight:1.6,fontFamily:"inherit"}}/></Card>
+          <Card style={{padding:"14px 16px"}}><div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:10}}>파일 첨부 (4MB 이하)</div>
+            <input ref={fileRef} type="file" style={{display:"none"}} onChange={e=>handleFile(e.target.files?.[0])}/>
+            {form.fileName?<div style={{display:"flex",gap:10,alignItems:"center",background:"#F2F2F7",borderRadius:10,padding:"10px 14px"}}><span>📎</span><span style={{flex:1,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{form.fileName}</span><button onClick={()=>setForm(p=>({...p,fileName:"",fileData:""}))} style={{background:"#C7C7CC",border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",color:"#fff",fontSize:10,padding:0}}>✕</button></div>
+            :<button onClick={()=>fileRef.current?.click()} style={{width:"100%",background:"#F2F2F7",border:"1.5px dashed #C7C7CC",borderRadius:10,padding:"14px",fontSize:14,color:"#8E8E93",cursor:"pointer"}}>+ 파일 선택</button>}
+          </Card>
+        </div>
+      </div>);
+    }
+
+    function EntryDetailScreen({entry,onBack,onEdit,onDelete}){
+      const cat=getCat(entry.category);const exp=entry.expiryDate?daysUntil(entry.expiryDate):null;
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"12px 20px",display:"flex",justifyContent:"space-between",borderBottom:"1px solid #F2F2F7"}}>
+          <button onClick={onBack} style={{background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:6,color:"#007AFF",fontSize:15,padding:0}}><Ic.back/> 뒤로</button>
+          <button onClick={onEdit} style={{background:"none",border:"none",color:"#007AFF",fontSize:15,fontWeight:500,cursor:"pointer"}}>수정</button>
+        </div>
+        <div style={{padding:"20px 16px 100px"}}>
+          <Card style={{padding:"20px",marginBottom:12}}>
+            <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:14}}><div style={{width:52,height:52,borderRadius:14,background:cat.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,color:cat.color}}>{cat.icon}</div><span style={{background:cat.bg,color:cat.color,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:600}}>{cat.icon} {cat.label}</span></div>
+            <div style={{fontSize:22,fontWeight:800,color:"#000",letterSpacing:"-0.03em",lineHeight:1.3,marginBottom:8}}>{entry.title}</div>
+            <div style={{fontSize:13,color:"#8E8E93"}}>{fmtDate(entry.date)}</div>
+            {exp!==null&&<div style={{marginTop:10,background:exp<=14?"#FFF0F0":exp<=30?"#FFFBEB":"#F0FFF4",borderRadius:10,padding:"10px 14px"}}>
+              <div style={{fontSize:12,fontWeight:700,color:exp<=14?"#DC2626":exp<=30?"#D97706":"#059669"}}>만료일: {fmtDate(entry.expiryDate)} ({exp}일 남음)</div>
+            </div>}
+          </Card>
+          {entry.desc&&<Card style={{padding:"18px",marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:"#8E8E93",marginBottom:10}}>메모</div><div style={{fontSize:15,color:"#000",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{entry.desc}</div></Card>}
+          {entry.url&&<Card style={{padding:"16px 18px",marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:"#8E8E93",marginBottom:8}}>링크</div><a href={entry.url} target="_blank" rel="noreferrer" style={{fontSize:14,color:"#007AFF",wordBreak:"break-all",textDecoration:"none"}}>{entry.url}</a></Card>}
+          {entry.fileData&&<Card style={{padding:"16px 18px",marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:"#8E8E93",marginBottom:10}}>첨부</div>{entry.fileData.startsWith("data:image")?<img src={entry.fileData} alt="" style={{width:"100%",borderRadius:10}}/>:<a href={entry.fileData} download={entry.fileName} style={{display:"flex",gap:10,alignItems:"center",background:"#F2F2F7",borderRadius:10,padding:"12px 14px",textDecoration:"none"}}><span>📎</span><span style={{fontSize:13,color:"#007AFF"}}>{entry.fileName}</span></a>}</Card>}
+          <button onClick={onDelete} style={{background:"#fff",border:"none",borderRadius:16,padding:"16px",width:"100%",fontSize:15,fontWeight:600,color:"#FF3B30",cursor:"pointer",marginTop:8}}>삭제</button>
+        </div>
+      </div>);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // SETTINGS
+    // ══════════════════════════════════════════════════════════
+    function SettingsScreen({entries,newsItems,team}){
+      const [report,setReport]=useState("");const [loadingReport,setLoadingReport]=useState(false);
+      const [exporting,setExporting]=useState(false);
+
+      const earned=MILESTONES.filter(m=>m.check(entries,newsItems,team));
+
+      const genReport=async()=>{
+        setLoadingReport(true);setReport("");
+        const recentEntries=entries.slice(0,10).map(e=>`[${fmtShort(e.date)}] ${e.title} (${getCat(e.category).label})`).join("\n");
+        const recentNews=newsItems.slice(0,5).map(n=>`[${fmtShort(n.date)}] ${n.title} - ${n.outlet||""}`).join("\n");
+        try{
+          const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,messages:[{role:"user",content:`피토리(Fitory) 스타트업의 최근 활동 기록을 바탕으로 주간 리포트를 한국어로 작성해주세요.\n최근 기록:\n${recentEntries}\n\n최근 뉴스:\n${recentNews||"없음"}`}]})});
+          const data=await res.json();
+          setReport(data.content?.[0]?.text||"리포트 생성 실패");
+        }catch{setReport("네트워크 오류가 발생했어요.");}
+        setLoadingReport(false);
+      };
+
+      const exportHTML=()=>{
+        setExporting(true);
+        const html=`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>Fitory 히스토리</title><style>body{font-family:-apple-system,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#000}h1{font-size:32px;font-weight:800;margin-bottom:4px}h2{font-size:18px;font-weight:700;margin:32px 0 12px;padding-bottom:8px;border-bottom:2px solid #f0f0f0}.entry{padding:14px 0;border-bottom:1px solid #f5f5f5;display:flex;gap:14px}.cat{font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px}.date{font-size:12px;color:#999}.title{font-size:16px;font-weight:600;margin:4px 0}.desc{font-size:13px;color:#666;line-height:1.6}.meta{font-size:11px;color:#999;margin-top:16px}</style></head><body>
+    <h1>🏢 Fitory</h1><p style="color:#999;margin-bottom:40px">창업 히스토리 · ${new Date().toLocaleDateString("ko-KR")}</p>
+    ${entries.map(e=>`<div class="entry"><div class="date">${fmtDate(e.date)}</div><div><div class="title">${e.title}</div>${e.desc?`<div class="desc">${e.desc}</div>`:""}</div></div>`).join("")}
+    <div class="meta">총 ${entries.length}개 기록 · 뉴스 ${newsItems.length}건 · 팀원 ${team.length}명</div></body></html>`;
+        const blob=new Blob([html],{type:"text/html"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="fitory-history.html";a.click();
+        setExporting(false);
+      };
+
+      const byCat=CATS.map(c=>({...c,count:entries.filter(e=>e.category===c.id).length})).filter(c=>c.count>0);
+
+      return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7"}}>
+        <div style={{background:"#fff",padding:"8px 20px 16px",borderBottom:"1px solid rgba(0,0,0,0.06)"}}><div style={{fontSize:28,fontWeight:800,letterSpacing:"-0.04em",color:"#000"}}>설정</div></div>
+        <div style={{padding:"16px 12px 100px",display:"flex",flexDirection:"column",gap:20}}>
+          <div><div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8,paddingLeft:4}}>마일스톤 ({earned.length}/{MILESTONES.length})</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {MILESTONES.map(m=>{const ok=m.check(entries,newsItems,team);return(<div key={m.id} style={{background:ok?"#fff":"#FAFAFA",borderRadius:14,padding:"14px",border:`1px solid ${ok?"#DBEAFE":"#F0F0F0"}`,opacity:ok?1:0.5}}>
+                <div style={{fontSize:22,marginBottom:6}}>{m.icon}</div>
+                <div style={{fontSize:13,fontWeight:700,color:ok?"#000":"#999",marginBottom:2}}>{m.label}</div>
+                <div style={{fontSize:11,color:ok?"#8E8E93":"#C7C7CC",lineHeight:1.4}}>{ok?m.desc:"미달성"}</div>
+              </div>);})}
+            </div>
+          </div>
+          <div><div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8,paddingLeft:4}}>주간 AI 리포트</div>
+            <Card style={{padding:"16px"}}>
+              <button onClick={genReport} disabled={loadingReport} style={{width:"100%",background:loadingReport?"#F2F2F7":"linear-gradient(135deg,#007AFF,#00C2FF)",border:"none",borderRadius:12,padding:"13px",color:loadingReport?"#999":"#fff",fontSize:14,fontWeight:700,cursor:loadingReport?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                {loadingReport?<><span style={{display:"inline-block",width:14,height:14,border:"2px solid #CCC",borderTopColor:"#999",borderRadius:"50%",animation:"spin .7s linear infinite"}}/> 생성 중…</>:"✦ 이번 주 리포트 생성"}
+              </button>
+              {report&&<div style={{marginTop:14,fontSize:13,color:"#333",lineHeight:1.8,whiteSpace:"pre-wrap",background:"#F9FAFB",borderRadius:10,padding:"14px"}}>{report}</div>}
+            </Card>
+          </div>
+          <div><div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8,paddingLeft:4}}>내보내기</div>
+            <Card style={{overflow:"hidden"}}>
+              <button onClick={exportHTML} disabled={exporting} style={{width:"100%",padding:"15px 16px",background:"none",border:"none",display:"flex",alignItems:"center",gap:12,cursor:"pointer",borderBottom:"1px solid #F2F2F7"}}>
+                <span style={{fontSize:20}}>📄</span><div style={{textAlign:"left"}}><div style={{fontSize:14,fontWeight:600,color:"#000"}}>히스토리 HTML 내보내기</div><div style={{fontSize:11,color:"#8E8E93",marginTop:2}}>투자자 공유용 웹 페이지 생성</div></div>
+                <svg style={{marginLeft:"auto"}} width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="#C7C7CC" strokeWidth="2" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+              </button>
+              <button onClick={()=>window.print()} style={{width:"100%",padding:"15px 16px",background:"none",border:"none",display:"flex",alignItems:"center",gap:12,cursor:"pointer"}}>
+                <span style={{fontSize:20}}>🖨️</span><div style={{textAlign:"left"}}><div style={{fontSize:14,fontWeight:600,color:"#000"}}>PDF로 저장</div><div style={{fontSize:11,color:"#8E8E93",marginTop:2}}>인쇄 → PDF 저장 (브라우저 내장)</div></div>
+                <svg style={{marginLeft:"auto"}} width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="#C7C7CC" strokeWidth="2" strokeLinecap="round"><path d="M1 1l5 5-5 5"/></svg>
+              </button>
+            </Card>
+          </div>
+          <div><div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8,paddingLeft:4}}>통계</div>
+            <Card style={{overflow:"hidden"}}>
+              {[["기록",`${entries.length}개`],["뉴스",`${newsItems.length}건`],["팀원",`${team.length}명`]].map(([l,v],i)=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"13px 16px",borderTop:i>0?"1px solid #F2F2F7":"none"}}><span style={{fontSize:14}}>{l}</span><span style={{fontSize:14,fontWeight:600,color:"#8E8E93"}}>{v}</span></div>)}
+            </Card>
+          </div>
+          {byCat.length>0&&<div><div style={{fontSize:12,fontWeight:600,color:"#8E8E93",marginBottom:8,paddingLeft:4}}>카테고리별</div>
+            <Card style={{overflow:"hidden"}}>{byCat.sort((a,b)=>b.count-a.count).map((c,i)=><div key={c.id} style={{display:"flex",alignItems:"center",padding:"12px 16px",borderTop:i>0?"1px solid #F2F2F7":"none",gap:12}}>
+              <div style={{width:30,height:30,borderRadius:8,background:c.bg,display:"flex",alignItems:"center",justifyContent:"center",color:c.color,fontSize:13}}>{c.icon}</div>
+              <span style={{flex:1,fontSize:14,fontWeight:500}}>{c.label}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:50,height:3,borderRadius:2,background:"#F2F2F7"}}><div style={{height:"100%",borderRadius:2,background:c.color,width:`${Math.round(c.count/entries.length*100)}%`}}/></div><span style={{fontSize:13,fontWeight:700,color:c.color,minWidth:14,textAlign:"right"}}>{c.count}</span></div>
+            </div>)}</Card>
+          </div>}
+          <Card style={{overflow:"hidden"}}>{[["앱","Fitory History"],["버전","4.0.0"],["만든 이","히댕 × Claude"]].map(([l,v],i)=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"13px 16px",borderTop:i>0?"1px solid #F2F2F7":"none"}}><span style={{fontSize:14}}>{l}</span><span style={{fontSize:14,color:"#8E8E93"}}>{v}</span></div>)}</Card>
+        </div>
+      </div>);
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // MAIN APP
+    // ══════════════════════════════════════════════════════════
+    function FitoryApp(){
+      const [entries,setEntries]=useState([]);const [newsItems,setNewsItems]=useState([]);const [team,setTeam]=useState([]);const [memos,setMemos]=useState([]);
+      const [loaded,setLoaded]=useState(false);const [splash,setSplash]=useState(true);
+      const [screen,setScreen]=useState("home");const [tab,setTab]=useState("home");
+      const [sel,setSel]=useState(null);const [selNews,setSelNews]=useState(null);const [selMember,setSelMember]=useState(null);
+      const [prefillDate,setPrefillDate]=useState(null);
+
+      useEffect(()=>{
+        (async()=>{
+          try{const r=await window.storage.get(SKE);if(r){const d=JSON.parse(r.value);setEntries(d.length>0?d:SEED);}else setEntries(SEED);}catch{setEntries(SEED);}
+          try{const r=await window.storage.get(SKN);if(r)setNewsItems(JSON.parse(r.value));}catch{}
+          try{const r=await window.storage.get(SKT);if(r){const d=JSON.parse(r.value);setTeam(d.length>0?d:SEED_TEAM);}else setTeam(SEED_TEAM);}catch{setTeam(SEED_TEAM);}
+          try{const r=await window.storage.get(SKM);if(r)setMemos(JSON.parse(r.value));}catch{}
+          setLoaded(true);setTimeout(()=>setSplash(false),1400);
+        })();
+      },[]);
+
+      const saveE=async n=>{const s=[...n].sort((a,b)=>new Date(b.date)-new Date(a.date));setEntries(s);try{await window.storage.set(SKE,JSON.stringify(s));}catch{} return s;};
+      const saveN=async n=>{const s=[...n].sort((a,b)=>new Date(b.date)-new Date(a.date));setNewsItems(s);try{await window.storage.set(SKN,JSON.stringify(s));}catch{} return s;};
+      const saveT=async n=>{setTeam(n);try{await window.storage.set(SKT,JSON.stringify(n));}catch{} return n;};
+      const saveM=async n=>{setMemos(n);try{await window.storage.set(SKM,JSON.stringify(n));}catch{} return n;};
+
+      const handleSaveEntry=async fd=>{
+        const isEdit=!!sel&&screen==="edit_entry";
+        const ne={id:isEdit?sel.id:Date.now().toString(),...fd,createdAt:isEdit?sel.createdAt:Date.now()};
+        const upd=isEdit?entries.map(e=>e.id===sel.id?ne:e):[ne,...entries];
+        await saveE(upd);
+        if(isEdit){setSel(ne);setScreen("detail_entry");}else{setScreen(tab);setPrefillDate(null);}
+      };
+      const handleSaveNews=async fd=>{const item={id:Date.now().toString(),...fd};await saveN([item,...newsItems]);setScreen("news");setTab("news");};
+      const handleSaveMember=async fd=>{
+        const isEdit=!!selMember&&screen==="edit_member";
+        const nm={id:isEdit?selMember.id:Date.now().toString(),...fd};
+        const upd=isEdit?team.map(t=>t.id===selMember.id?nm:t):[...team,nm];
+        await saveT(upd);
+        if(isEdit){setSelMember(nm);setScreen("detail_member");}else{setScreen("team");setTab("team");}
+      };
+      const handleAddMemo=async text=>{const m={id:Date.now().toString(),text,createdAt:Date.now()};await saveM([m,...memos]);};
+      const handleDeleteMemo=async id=>await saveM(memos.filter(m=>m.id!==id));
+      const handleDeleteEntry=async()=>{if(!confirm("삭제?"))return;await saveE(entries.filter(e=>e.id!==sel.id));setScreen(tab);setSel(null);};
+      const handleDeleteNews=async()=>{if(!confirm("삭제?"))return;await saveN(newsItems.filter(n=>n.id!==selNews.id));setScreen("news");setTab("news");setSelNews(null);};
+      const handleDeleteMember=async()=>{if(!confirm("삭제?"))return;await saveT(team.filter(t=>t.id!==selMember.id));setScreen("team");setTab("team");setSelMember(null);};
+
+      const navTo=t=>{setTab(t);setScreen(t);setSel(null);setSelNews(null);setSelMember(null);setPrefillDate(null);};
+
+      const renderScreen=()=>{
+        if(screen==="detail_entry"&&sel) return <EntryDetailScreen entry={sel} onBack={()=>{setScreen(tab);setSel(null);}} onEdit={()=>setScreen("edit_entry")} onDelete={handleDeleteEntry}/>;
+        if(screen==="edit_entry") return <AddEntryScreen entry={sel} onSave={handleSaveEntry} onClose={()=>setScreen("detail_entry")}/>;
+        if(screen==="add_entry") return <AddEntryScreen prefillDate={prefillDate} onSave={handleSaveEntry} onClose={()=>{setScreen(tab);setPrefillDate(null);}}/>;
+        if(screen==="add_news") return <AddNewsScreen onSave={handleSaveNews} onClose={()=>{setScreen("news");setTab("news");}}/>;
+        if(screen==="detail_news"&&selNews) return <NewsDetailScreen item={selNews} onBack={()=>{setScreen("news");setSelNews(null);}} onDelete={handleDeleteNews}/>;
+        if(screen==="detail_member"&&selMember) return <TeamDetailScreen member={selMember} onBack={()=>{setScreen("team");setSelMember(null);}} onEdit={()=>setScreen("edit_member")} onDelete={handleDeleteMember}/>;
+        if(screen==="edit_member") return <AddTeamScreen member={selMember} onSave={handleSaveMember} onClose={()=>setScreen("detail_member")}/>;
+        if(screen==="add_member") return <AddTeamScreen onSave={handleSaveMember} onClose={()=>{setScreen("team");setTab("team");}}/>;
+        if(tab==="news") return <NewsScreen newsItems={newsItems} onAddNews={()=>setScreen("add_news")} onNewsItem={n=>{setSelNews(n);setScreen("detail_news");}}/>;
+        if(tab==="calendar") return <CalendarScreen entries={entries} onEntry={e=>{setSel(e);setScreen("detail_entry");}} onAdd={d=>{setPrefillDate(d);setScreen("add_entry");}}/>;
+        if(tab==="team") return <TeamScreen team={team} memos={memos} onAddMember={()=>setScreen("add_member")} onMember={m=>{setSelMember(m);setScreen("detail_member");}} onAddMemo={handleAddMemo} onDeleteMemo={handleDeleteMemo}/>;
+        if(tab==="settings") return <SettingsScreen entries={entries} newsItems={newsItems} team={team}/>;
+        return <HomeScreen entries={entries} newsItems={newsItems} team={team} onAdd={()=>{setSel(null);setPrefillDate(null);setScreen("add_entry");}} onEntry={e=>{setSel(e);setScreen("detail_entry");}}/>;
+      };
+
+      const showNav=["home","news","calendar","team","settings"].includes(screen);
+
+      return(<div style={{width:"100%",maxWidth:390,margin:"0 auto",height:"100vh",background:"#fff",display:"flex",flexDirection:"column",overflow:"hidden",boxShadow:"0 0 60px rgba(0,0,0,0.15)"}}>
+        <style>{`@keyframes splashFade{0%{opacity:1}80%{opacity:1}100%{opacity:0}}@keyframes logoIn{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:scale(1)}}@keyframes spin{to{transform:rotate(360deg)}}*{-webkit-tap-highlight-color:transparent;box-sizing:border-box}::-webkit-scrollbar{display:none}@media print{.no-print{display:none}}`}</style>
+        {splash&&<div style={{position:"absolute",inset:0,background:"#000",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:100,animation:"splashFade 1.4s ease forwards",pointerEvents:"none"}}>
+          <div style={{animation:"logoIn .5s ease both"}}>
+            <div style={{width:72,height:72,borderRadius:20,background:"linear-gradient(135deg,#007AFF,#00C2FF)",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:16,boxShadow:"0 8px 32px rgba(0,122,255,.5)"}}><span style={{fontSize:32,color:"#fff",fontWeight:900,fontStyle:"italic"}}>F</span></div>
+            <div style={{fontSize:14,color:"rgba(255,255,255,0.4)",textAlign:"center",fontWeight:500,letterSpacing:"0.15em"}}>FITORY HISTORY</div>
+          </div>
+        </div>}
+        <StatusBar/>
+        <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>{loaded&&renderScreen()}</div>
+        {showNav&&<BottomNav active={tab} onNav={navTo}/>}
+      </div>);
+    }
+
+    // 💡 3. 마지막으로 화면에 렌더링!
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    root.render(<FitoryApp />);
   </script>
 </body>
 </html>
