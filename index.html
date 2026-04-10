@@ -142,24 +142,17 @@
     function HomeScreen({entries,newsItems,team,onAdd,onEntry}){
       const grouped=entries.reduce((acc,e)=>{const ym=e.date.slice(0,7);if(!acc[ym])acc[ym]=[];acc[ym].push(e);return acc;},{});
       const sorted=Object.keys(grouped).sort((a,b)=>b.localeCompare(a));
-      const earned=MILESTONES.filter(m=>m.check(entries,newsItems,team));
       const expiring=entries.filter(e=>e.expiryDate&&daysUntil(e.expiryDate)!==null&&daysUntil(e.expiryDate)<=60).sort((a,b)=>new Date(a.expiryDate)-new Date(b.expiryDate));
 
       return(<div style={{flex:1,overflow:"auto",background:"#F2F2F7",paddingTop:"env(safe-area-inset-top)"}}>
         <div style={{background:"#fff",padding:"16px 20px 16px",borderBottom:"1px solid rgba(0,0,0,0.06)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
             <div>
               <div style={{fontSize:11,fontWeight:600,letterSpacing:"0.06em",color:"#999",marginBottom:4}}>FITORY</div>
               <div style={{fontSize:28,fontWeight:800,letterSpacing:"-0.04em",color:"#000",lineHeight:1}}>히스토리</div>
             </div>
             <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#007AFF,#00C2FF)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 12px rgba(0,122,255,.35)"}}><span style={{fontSize:16,color:"#fff",fontWeight:800}}>F</span></div>
           </div>
-          {earned.length>0&&<div style={{overflowX:"auto",display:"flex",gap:8,paddingBottom:4,scrollbarWidth:"none"}}>
-            {earned.map(m=><div key={m.id} style={{flexShrink:0,background:"linear-gradient(135deg,#F0F7FF,#E8F4FF)",borderRadius:12,padding:"8px 12px",display:"flex",alignItems:"center",gap:6,border:"1px solid #DBEAFE"}}>
-              <span style={{fontSize:16}}>{m.icon}</span>
-              <div><div style={{fontSize:11,fontWeight:700,color:"#1D4ED8",whiteSpace:"nowrap"}}>{m.label}</div></div>
-            </div>)}
-          </div>}
         </div>
 
         <div style={{padding:"12px 0 20px"}}>
