@@ -51,8 +51,8 @@ const SEED_T=[
 ];
 
 // ── STORAGE HELPERS (all shared=true) ─────────────────────
-async function sGet(key){try{const r=await window.storage.get(key,true);return r?JSON.parse(r.value):null;}catch{return null;}}
-async function sSet(key,val){try{await window.storage.set(key,JSON.stringify(val),true);}catch{}}
+async function sGet(key){try{const v=localStorage.getItem(key);return v?JSON.parse(v):null;}catch{return null;}}
+async function sSet(key,val){try{localStorage.setItem(key,JSON.stringify(val));}catch{}}
 
 // ── ICONS ──────────────────────────────────────────────────
 const Ic={
@@ -225,7 +225,15 @@ function AddNewsScreen({onSave,onClose}){
   };
   const parseArticle=async()=>{
     if(!pasted.trim())return;setParsing(true);
-    try{const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,messages:[{role:"user",content:`다음 한국 뉴스에서 정보를 추출하세요. JSON만 반환:\n{"outlet":"언론사명","journalist":"기자이름","title":"기사제목"}\n\n${pasted.slice(0,2000)}`}]})});
+    try{const res=await const ANTHROPIC_KEY = "sk-ant-여기에-본인-API-키"; // 팀 내부 전용이면 이렇게 직접 박아도 OK
+fetch("https://api.anthropic.com/v1/messages", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-api-key": ANTHROPIC_KEY,
+    "anthropic-version": "2023-06-01",
+    "anthropic-dangerous-direct-browser-access": "true"
+  },body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,messages:[{role:"user",content:`다음 한국 뉴스에서 정보를 추출하세요. JSON만 반환:\n{"outlet":"언론사명","journalist":"기자이름","title":"기사제목"}\n\n${pasted.slice(0,2000)}`}]})});
       const data=await res.json();const raw=data.content?.[0]?.text||"{}";
       const parsed=JSON.parse(raw.replace(/```json|```/g,"").trim());
       setPrev(p=>({...p,...parsed,outletColor:OUTLET_COLORS[parsed.outlet]||"#6B7280"}));
