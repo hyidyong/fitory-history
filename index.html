@@ -13,7 +13,6 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    // 💡 여기서 핵심! import를 쓰지 않고 전역 변수 React에서 꺼내 씁니다.
     const { useState, useEffect } = React;
 
     const DEFAULT_CATS = [
@@ -100,7 +99,6 @@
       }
     };
 
-    // 💡 export default 쓰지 않고 그냥 function으로 선언합니다.
     function App() {
       const [entries, setEntries] = useState([]);
       const [title, setTitle] = useState("");
@@ -243,7 +241,6 @@
       );
     }
 
-    // 💡 화면에 렌더링
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
