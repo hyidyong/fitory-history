@@ -7,7 +7,6 @@
   
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
@@ -16,9 +15,6 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // ─────────────────────────────
-    // 1. 피토리 앱 기본 데이터 설정
-    // ─────────────────────────────
     const DEFAULT_CATS = [
       { id: "video", label: "영상", icon: "▶", color: "#FF6B35", bg: "#FFF0EB" },
       { id: "landing", label: "랜딩페이지", icon: "⬡", color: "#3B82F6", bg: "#EFF6FF" },
@@ -33,10 +29,8 @@
     const SK = { E: "fitory-v5-entries" };
 
     const SEED_E = [
-      { id: "s1", date: "2026-03-01", category: "domain", title: "fitory.kr 도메인 구매", desc: "가비아 등록", url: "https://fitory.kr", fileName: "", fileData: null },
-      { id: "s2", date: "2026-03-08", category: "bizplan", title: "예창패 사업계획서 1차 초안", desc: "여성 특화 트랙", url: "", fileName: "", fileData: null },
-      { id: "s3", date: "2026-03-20", category: "proto", title: "React 모바일 시뮬레이터", desc: "대여+구매 통합", url: "", fileName: "", fileData: null },
-      { id: "s4", date: "2026-04-01", category: "landing", title: "랜딩페이지 1차 배포", desc: "고객 반응 테스트 시작", url: "", fileName: "", fileData: null }
+      { id: "s1", date: "2026-03-01", category: "domain", title: "fitory.kr 도메인 구매", desc: "가비아 등록", fileName: "", fileData: null },
+      { id: "s2", date: "2026-03-08", category: "bizplan", title: "예창패 사업계획서 1차 초안", desc: "여성 특화 트랙", fileName: "", fileData: null }
     ];
 
     const fmtDate = (d) => {
@@ -44,24 +38,23 @@
       return new Date(`${d}T00:00:00`).toLocaleDateString();
     };
 
-    // ─────────────────────────────
-    // 2. IndexedDB 설정 (에러 방어 로직 추가)
-    // ─────────────────────────────
     const DB_NAME = "fitory-db";
     const STORE_NAME = "store";
 
     function openDB() {
       return new Promise((resolve, reject) => {
         try {
+          if (!window.indexedDB) {
+            console.warn("이 브라우저에서는 IndexedDB를 지원하지 않습니다.");
+            return reject("No IndexedDB");
+          }
           const req = window.indexedDB.open(DB_NAME, 1);
-
           req.onupgradeneeded = () => {
             const db = req.result;
             if (!db.objectStoreNames.contains(STORE_NAME)) {
               db.createObjectStore(STORE_NAME);
             }
           };
-
           req.onsuccess = () => resolve(req.result);
           req.onerror = () => reject(req.error);
         } catch (err) {
@@ -77,11 +70,11 @@
           const tx = db.transaction(STORE_NAME, "readonly");
           const store = tx.objectStore(STORE_NAME);
           const req = store.get(key);
-
           req.onsuccess = () => resolve(req.result);
           req.onerror = () => reject(req.error);
         });
       } catch (err) {
+        console.error("데이터 로드 실패 (브라우저 보안 문제일 수 있음):", err);
         return null;
       }
     }
@@ -93,11 +86,12 @@
           const tx = db.transaction(STORE_NAME, "readwrite");
           const store = tx.objectStore(STORE_NAME);
           store.put(value, key);
-
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);
         });
-      } catch (err) {}
+      } catch (err) {
+        console.error("데이터 저장 실패:", err);
+      }
     }
 
     const getSafeObjectURL = (data) => {
@@ -109,12 +103,8 @@
       }
     };
 
-    // ─────────────────────────────
-    // 3. 메인 App 컴포넌트
-    // ─────────────────────────────
     function App() {
       const [entries, setEntries] = useState([]);
-      
       const [title, setTitle] = useState("");
       const [category, setCategory] = useState("other");
       const [desc, setDesc] = useState("");
@@ -125,12 +115,12 @@
           try {
             const data = await sGet(SK.E);
             if (!data || data.length === 0) {
-              await sSet(SK.E, SEED_E);
               setEntries(SEED_E);
             } else {
               setEntries(data);
             }
           } catch (e) {
+            console.error("DB 접근 불가. 임시 데이터로 렌더링합니다.");
             setEntries(SEED_E);
           }
         })();
@@ -167,7 +157,6 @@
         try {
           const url = getSafeObjectURL(entry.fileData);
           if (!url) return alert("손상된 파일입니다.");
-          
           const a = document.createElement("a");
           a.href = url;
           a.download = entry.fileName;
@@ -227,11 +216,9 @@
               
               return (
                 <div key={entry.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 15, marginBottom: 15, display: "flex", gap: 15 }}>
-                  
                   <div style={{ width: 50, height: 50, borderRadius: "50%", background: catInfo.bg, color: catInfo.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
                     {catInfo.icon}
                   </div>
-
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 12, color: "#666" }}>{fmtDate(entry.date)}</div>
                     <h3 style={{ margin: "5px 0" }}>{entry.title}</h3>
@@ -240,24 +227,17 @@
                     {entry.fileData && (
                       <div style={{ marginTop: 15, padding: 10, background: "#f1f5f9", borderRadius: 5, display: "inline-block" }}>
                         <div style={{ fontSize: 12, marginBottom: 5 }}>📁 {entry.fileName}</div>
-                        
                         {isImage && getSafeObjectURL(entry.fileData) && (
                           <div style={{ marginBottom: 10 }}>
-                            <img 
-                              src={getSafeObjectURL(entry.fileData)} 
-                              alt="preview" 
-                              style={{ maxWidth: 200, borderRadius: 5, border: "1px solid #ccc" }} 
-                            />
+                            <img src={getSafeObjectURL(entry.fileData)} alt="preview" style={{ maxWidth: 200, borderRadius: 5, border: "1px solid #ccc" }} />
                           </div>
                         )}
-                        
                         <button onClick={() => downloadFile(entry)} style={{ fontSize: 12, padding: "5px 10px", cursor: "pointer", background: "white", border: "1px solid #ccc", borderRadius: 4 }}>
                           ⬇ 다운로드
                         </button>
                       </div>
                     )}
                   </div>
-
                 </div>
               );
             })}
@@ -266,9 +246,6 @@
       );
     }
 
-    // ─────────────────────────────
-    // 4. React 렌더링
-    // ─────────────────────────────
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
